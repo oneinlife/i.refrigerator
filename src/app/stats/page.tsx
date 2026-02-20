@@ -15,7 +15,6 @@ import {
   TrendingUp,
   Calendar,
   AlertCircle,
-  ShoppingCart,
   LogIn,
 } from 'lucide-react';
 import { differenceInDays } from 'date-fns';
@@ -34,7 +33,6 @@ export default function StatsPage() {
     expiringItems: 0,
     expiredItems: 0,
     mostUsedProducts: [] as Array<{ name: string; count: number }>,
-    categoryDistribution: [] as Array<{ category: string; count: number }>,
     expiryTimeline: [] as Array<{ name: string; days: number }>,
   });
 
@@ -80,24 +78,12 @@ export default function StatsPage() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // Category distribution
-    const categoryMap = new Map<string, number>();
-    inventory.forEach((item: InventoryItemWithProduct) => {
-      const category = item.product.category;
-      categoryMap.set(category, (categoryMap.get(category) || 0) + 1);
-    });
-
-    const categoryDistribution = Array.from(categoryMap.entries())
-      .map(([category, count]) => ({ category, count }))
-      .sort((a, b) => b.count - a.count);
-
     setStats({
       totalProducts,
       totalRecipes,
       expiringItems,
       expiredItems,
       mostUsedProducts: productUsage,
-      categoryDistribution,
       expiryTimeline,
     });
   };
@@ -211,7 +197,7 @@ export default function StatsPage() {
             </div>
 
             {/* Charts and Lists */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               {/* Most Used Products */}
               <FadeIn delay={0.5}>
                 <div className="bg-white rounded-xl shadow-md p-6">
@@ -231,38 +217,6 @@ export default function StatsPage() {
                         <span className="text-sm font-medium text-gray-500">
                           {product.count} раз
                         </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </FadeIn>
-
-              {/* Category Distribution */}
-              <FadeIn delay={0.6}>
-                <div className="bg-white rounded-xl shadow-md p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <ShoppingCart className="w-5 h-5 text-blue-600" />
-                    <h2 className="text-xl font-bold text-gray-900">
-                      Категории в холодильнике
-                    </h2>
-                  </div>
-                  <div className="space-y-3">
-                    {stats.categoryDistribution.map((cat, idx) => (
-                      <div key={idx} className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-gray-700">{cat.category}</span>
-                          <span className="text-sm font-medium text-gray-500">
-                            {cat.count}
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-500 h-2 rounded-full transition-all"
-                            style={{
-                              width: `${(cat.count / inventory.length) * 100}%`,
-                            }}
-                          />
-                        </div>
                       </div>
                     ))}
                   </div>

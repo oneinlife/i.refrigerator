@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useShoppingList } from '@/hooks/useShoppingList';
@@ -10,7 +10,7 @@ import type { ShoppingListItemWithDetails } from '@/types/shopping';
 
 type ViewMode = 'list' | 'grouped';
 
-export default function ShoppingListPage() {
+function ShoppingListContent() {
   const searchParams = useSearchParams();
   const recipeIdFromQuery = searchParams?.get('recipe');
 
@@ -397,5 +397,13 @@ export default function ShoppingListPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function ShoppingListPage() {
+  return (
+    <Suspense fallback={<div className="p-8">Загрузка...</div>}>
+      <ShoppingListContent />
+    </Suspense>
   );
 }

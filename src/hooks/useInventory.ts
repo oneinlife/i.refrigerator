@@ -147,17 +147,17 @@ export function useInventory() {
     const lowerQuery = query.toLowerCase();
     return inventory.filter(item =>
       item.product.name.toLowerCase().includes(lowerQuery) ||
-      item.product.category.toLowerCase().includes(lowerQuery) ||
       item.notes?.toLowerCase().includes(lowerQuery)
     );
   }, [inventory]);
 
   /**
    * Фильтрация по категории
+   * @deprecated Категории больше не поддерживаются в новой структуре
    */
   const filterByCategory = useCallback((category: string): InventoryItemWithProduct[] => {
-    return inventory.filter(item => item.product.category === category);
-  }, [inventory]);
+    return [];
+  }, []);
 
   /**
    * Получить просроченные продукты

@@ -222,7 +222,6 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
           try {
             const newProduct = await addProduct({
               name: ing.productName,
-              category: categories[0] || 'Прочее', // Используем первую категорию рецепта
               default_unit: ing.unit,
               usage_count: 0,
             });

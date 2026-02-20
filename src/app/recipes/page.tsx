@@ -203,7 +203,7 @@ export default function RecipesPage() {
               {mostUsed.map((recipe, index) => (
                 <Link
                   key={recipe.recipe_id}
-                  href={`/recipes/${recipe.recipe_id}`}
+                  href={`/recipes/view?id=${recipe.recipe_id}`}
                   className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm hover:bg-blue-200 transition flex items-center gap-2"
                 >
                   <span className="font-bold">#{index + 1}</span>
@@ -292,13 +292,13 @@ export default function RecipesPage() {
                   )}
                   <div className="flex gap-2">
                     <Link
-                      href={`/recipes/${recipe.recipe_id}`}
+                      href={`/recipes/view?id=${recipe.recipe_id}`}
                       className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-center text-sm"
                     >
                       Открыть
                     </Link>
                     <Link
-                      href={`/recipes/${recipe.recipe_id}/edit`}
+                      href={`/recipes/edit?id=${recipe.recipe_id}`}
                       className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition text-sm"
                     >
                       ✏️

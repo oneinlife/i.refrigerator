@@ -56,7 +56,6 @@ export default function InventoryCard({ item, onEdit, onDelete }: InventoryCardP
           </div>
           <div>
             <h3 className="font-semibold text-gray-900">{item.product.name}</h3>
-            <p className="text-sm text-gray-500">{item.product.category}</p>
           </div>
         </div>
         

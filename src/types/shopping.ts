@@ -84,24 +84,16 @@ export type GroupedShoppingList = ShoppingListGroup;
 export namespace ShoppingListUtils {
   /**
    * Группировка элементов по категориям продуктов
+   * @deprecated Категории больше не поддерживаются. Возвращает все элементы в одной группе.
    */
   export function groupByCategory(items: ShoppingListItemWithDetails[]): ShoppingListGroup[] {
-    const groups = new Map<string, ShoppingListItemWithDetails[]>();
-    
-    items.forEach(item => {
-      const category = item.product.category || 'Другое';
-      if (!groups.has(category)) {
-        groups.set(category, []);
-      }
-      groups.get(category)!.push(item);
-    });
-    
-    return Array.from(groups.entries()).map(([group_name, items]) => ({
-      group_name,
+    // Поскольку категории больше не поддерживаются, возвращаем все в одной группе
+    return [{
+      group_name: 'Все продукты',
       items,
       total_items: items.length,
       checked_items: items.filter(i => i.checked).length,
-    }));
+    }];
   }
   
   /**
