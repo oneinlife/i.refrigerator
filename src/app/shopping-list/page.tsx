@@ -1,18 +1,13 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useShoppingList } from '@/hooks/useShoppingList';
-import { useRecipeMatching } from '@/hooks/useRecipeMatching';
-import { logError } from '@/lib/errorLogger';
 import type { ShoppingListItemWithDetails } from '@/types/shopping';
 
 type ViewMode = 'list' | 'grouped';
 
 function ShoppingListContent() {
-  const searchParams = useSearchParams();
-  const recipeIdFromQuery = searchParams?.get('recipe');
 
   const {
     items,
@@ -28,68 +23,10 @@ function ShoppingListContent() {
     getChecked,
     getGroupedList,
     stats,
-    createFromRecipe,
   } = useShoppingList();
-
-  const { matchRecipe, loading: matchingLoading, recipesCount, inventoryCount } = useRecipeMatching();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [showChecked, setShowChecked] = useState(true);
-  const [pendingRecipeId, setPendingRecipeId] = useState<string | null>(null);
-
-  /**
-   * Создать список покупок из рецепта
-   */
-  const handleCreateFromRecipe = useCallback(async (recipeId: string) => {
-    console.log('handleCreateFromRecipe called with recipeId:', recipeId);
-    try {
-      console.log('Calling matchRecipe...');
-      const match = await matchRecipe(recipeId);
-      console.log('matchRecipe result:', {
-        match_percentage: match?.match_percentage,
-        missing_ingredients_count: match?.missing_ingredients.length,
-        missing_quantities_count: match?.missing_quantities.length,
-        missing_quantities: match?.missing_quantities
-      });
-      
-      if (match && match.missing_ingredients.length > 0) {
-        console.log('Creating shopping list from recipe...');
-        await createFromRecipe(match, recipeId, match.recipe.name);
-        console.log('Shopping list created successfully');
-      } else {
-        console.warn('No missing ingredients found for recipe:', recipeId);
-        if (match) {
-          alert('Все ингредиенты для этого рецепта уже есть в холодильнике!');
-        } else {
-          alert('Не удалось найти рецепт');
-        }
-      }
-    } catch (err) {
-      logError('ShoppingListPage.handleCreateFromRecipe', err);
-      console.error('Error creating shopping list from recipe:', err);
-    }
-  }, [matchRecipe, createFromRecipe]);
-
-  /**
-   * Обработать создание списка покупок из рецепта (query параметр)
-   */
-  useEffect(() => {
-    if (recipeIdFromQuery) {
-      console.log('Recipe ID from query:', recipeIdFromQuery, 'Loading:', matchingLoading);
-      setPendingRecipeId(recipeIdFromQuery);
-    }
-  }, [recipeIdFromQuery, matchingLoading]);
-
-  /**
-   * Ожидаем загрузки данных перед созданием списка покупок
-   */
-  useEffect(() => {
-    if (pendingRecipeId && !matchingLoading && recipesCount > 0 && inventoryCount >= 0) {
-      console.log('Data loaded, creating shopping list for pending recipe:', pendingRecipeId);
-      handleCreateFromRecipe(pendingRecipeId);
-      setPendingRecipeId(null);
-    }
-  }, [pendingRecipeId, matchingLoading, recipesCount, inventoryCount, handleCreateFromRecipe]);
 
   /**
    * Обработать изменение checkbox

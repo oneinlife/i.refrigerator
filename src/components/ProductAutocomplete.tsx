@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { Product } from '@/types/product';
+import { normalizeProductName } from '@/lib/utils/textUtils';
 
 interface ProductAutocompleteProps {
   value: string;
@@ -102,7 +103,9 @@ export default function ProductAutocomplete({
   };
 
   const handleProductClick = (product: Product) => {
-    onChange(product.name);
+    // Подставляем название с заглавной буквы
+    const normalizedName = normalizeProductName(product.name);
+    onChange(normalizedName);
     setIsOpen(false);
     setUserInteracted(false);
     onProductSelect?.(product);

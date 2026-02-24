@@ -10,6 +10,9 @@ export interface ShoppingListItem {
   /** Foreign Key → Products.product_id */
   product_id: string;
   
+  /** Название продукта (читается из формулы в Google Sheets) */
+  product_name?: string;
+  
   /** Foreign Key → Recipes.recipe_id (опционально, если добавлено из рецепта) */
   recipe_id?: string;
   

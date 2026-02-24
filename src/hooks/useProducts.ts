@@ -5,6 +5,7 @@ import type { Product, CreateProductInput } from '@/types/product';
 import { getProductsSyncService } from '@/lib/googleSheets/productsSync';
 import { storageService } from '@/lib/storageService';
 import { useGoogleApi } from '@/components/GoogleApiProvider';
+import { normalizeProductName } from '@/lib/utils/textUtils';
 
 /**
  * Хук для работы с справочником продуктов
@@ -205,15 +206,18 @@ export function useProducts() {
     name: string,
     defaultUnit: string
   ): Promise<Product | null> => {
+    // Нормализуем имя: капитализируем первую букву
+    const normalizedName = normalizeProductName(name);
+    
     // Попробовать найти существующий
-    const existing = findByName(name);
+    const existing = findByName(normalizedName);
     if (existing) {
       return existing;
     }
 
-    // Создать новый
+    // Создать новый с нормализованным именем
     return await addProduct({
-      name,
+      name: normalizedName,
       default_unit: defaultUnit,
       usage_count: 0,
     });

@@ -6,6 +6,7 @@ import type { Product } from '@/types/product';
 import { Unit } from '@/types/inventory';
 import ProductAutocomplete from './ProductAutocomplete';
 import { useProducts } from '@/hooks/useProducts';
+import { normalizeProductName } from '@/lib/utils/textUtils';
 
 interface InventoryFormProps {
   onSubmit: (item: CreateInventoryInput) => void;
@@ -67,9 +68,10 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
       productId = product?.product_id || '';
     }
 
-    // Если продукт не найден, создаём автоматически
+    // Если продукт не найден, создаём автоматически с нормализованным названием
     if (!product && selectedProduct?.name) {
-      const newProduct = await getOrCreateProduct(selectedProduct.name, formData.unit);
+      const normalizedName = normalizeProductName(selectedProduct.name);
+      const newProduct = await getOrCreateProduct(normalizedName, formData.unit);
       if (newProduct) {
         productId = newProduct.product_id;
         // Обновить список продуктов после создания
@@ -120,9 +122,11 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
                 setSelectedProduct(null);
                 setFormData({ ...formData, product_id: '' });
               } else {
+                // Капитализируем имя при ручном вводе
+                const normalizedValue = normalizeProductName(value);
                 setSelectedProduct({
                   product_id: '',
-                  name: value,
+                  name: normalizedValue,
                   default_unit: formData.unit,
                   usage_count: 0,
                   created_date: new Date().toISOString(),

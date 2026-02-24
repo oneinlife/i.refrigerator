@@ -2,105 +2,131 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useGoogleApi } from '@/components/GoogleApiProvider';
 import { useRecipeMatching } from '@/hooks/useRecipeMatching';
+import { useShoppingList } from '@/hooks/useShoppingList';
 import { logError } from '@/lib/errorLogger';
+import { storageService } from '@/lib/storageService';
 import type { RecipeMatch } from '@/types/recipe';
 
+const ITEMS_PER_PAGE = 20;
+
 export default function RecipeSearchPage() {
+  const router = useRouter();
   const {
-    loading,
     error,
-    recipesCount,
-    inventoryCount,
-    isDataLoaded,
+    loadMatches,
     matchAllRecipes,
-    getCookableRecipes,
-    getMatchStatistics,
-    groupRecipesByMatch,
   } = useRecipeMatching();
+  
+  const { isAuthenticated, isInitialized } = useGoogleApi();
+  
+  const { createFromRecipe } = useShoppingList();
 
   const [matches, setMatches] = useState<RecipeMatch[]>([]);
-  const [groupedMatches, setGroupedMatches] = useState<{
-    perfect: RecipeMatch[];
-    high: RecipeMatch[];
-    medium: RecipeMatch[];
-    low: RecipeMatch[];
-  } | null>(null);
-  const [statistics, setStatistics] = useState<{
-    total: number;
-    canCook: number;
-    averageMatch: number;
-    perfectMatches: number;
-  } | null>(null);
-  const [filterMode, setFilterMode] = useState<'all' | 'cookable' | 'perfect' | 'high'>('all');
   const [searchLoading, setSearchLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [creatingShoppingList, setCreatingShoppingList] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMorePages, setHasMorePages] = useState(true);
 
-  const performSearch = useCallback(async () => {
-    console.log('RecipeSearchPage - performSearch called');
+  const performSearch = useCallback(async (forceRefresh: boolean = false) => {
+    console.log('RecipeSearchPage - performSearch called', { forceRefresh });
     setSearchLoading(true);
     setHasSearched(true);
+    setCurrentPage(1);
     try {
-      console.log('RecipeSearchPage - calling matchAllRecipes...');
-      const allMatches = await matchAllRecipes();
-      console.log('RecipeSearchPage - matchAllRecipes returned:', allMatches.length, 'matches');
+      // Если требуется принудительное обновление, очищаем локальное состояние
+      if (forceRefresh) {
+        console.log('🔄 Force refresh - reloading from Google Sheets');
+        await loadMatches(true, ITEMS_PER_PAGE, 0); // Передаем true для очистки кэша
+        setMatches([]); // Очищаем текущие результаты
+      }
       
-      const grouped = await groupRecipesByMatch();
-      const stats = await getMatchStatistics();
+      console.log('RecipeSearchPage - calling matchAllRecipes...');
+      const allMatches = await matchAllRecipes(ITEMS_PER_PAGE, 0);
+      console.log('RecipeSearchPage - matchAllRecipes returned:', allMatches.length, 'matches');
 
       setMatches(allMatches);
-      setGroupedMatches(grouped);
-      setStatistics(stats);
+      setHasMorePages(allMatches.length === ITEMS_PER_PAGE);
     } catch (err) {
       logError('RecipeSearchPage.performSearch', err);
       console.error('RecipeSearchPage - performSearch error:', err);
     } finally {
       setSearchLoading(false);
     }
-  }, [matchAllRecipes, groupRecipesByMatch, getMatchStatistics]);
+  }, [matchAllRecipes, loadMatches]);
 
-  // Сбрасываем состояние поиска когда данные обновляются
-  useEffect(() => {
-    if (recipesCount > 0 || inventoryCount > 0) {
-      console.log('RecipeSearchPage - data updated, resetting hasSearched');
-      setHasSearched(false);
+  /**
+   * Создать список покупок из рецепта и перейти на страницу списка покупок
+   */
+  const handleCreateShoppingList = useCallback(async (match: RecipeMatch) => {
+    console.log('handleCreateShoppingList called for recipe:', match.recipe.recipe_id);
+    
+    if (match.missing_ingredients.length === 0) {
+      alert('Все ингредиенты для этого рецепта уже есть в холодильнике!');
+      return;
     }
-  }, [recipesCount, inventoryCount]);
+
+    setCreatingShoppingList(match.recipe.recipe_id);
+    try {
+      console.log('Creating shopping list from recipe...');
+      await createFromRecipe(match, match.recipe.recipe_id, match.recipe.name);
+      console.log('Shopping list created successfully, redirecting...');
+      
+      // Переходим на страницу списка покупок
+      router.push('/shopping-list');
+    } catch (err) {
+      logError('RecipeSearchPage.handleCreateShoppingList', err);
+      console.error('Error creating shopping list from recipe:', err);
+      alert('Ошибка при создании списка покупок');
+    } finally {
+      setCreatingShoppingList(null);
+    }
+  }, [createFromRecipe, router]);
+
+  // Загрузить следующую страницу
+  const loadNextPage = useCallback(async () => {
+    if (loadingMore || !hasMorePages) return;
+    
+    setLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      const offset = (nextPage - 1) * ITEMS_PER_PAGE;
+      console.log('Loading page:', nextPage, 'offset:', offset);
+      
+      const newMatches = await matchAllRecipes(ITEMS_PER_PAGE, offset);
+      
+      setMatches(prev => [...prev, ...newMatches]);
+      setCurrentPage(nextPage);
+      setHasMorePages(newMatches.length === ITEMS_PER_PAGE);
+    } catch (err) {
+      logError('RecipeSearchPage.loadNextPage', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [currentPage, hasMorePages, loadingMore, matchAllRecipes]);
 
   // Автоматический поиск после загрузки данных
   useEffect(() => {
+    const spreadsheetId = storageService.getSpreadsheetId();
+    
     console.log('RecipeSearchPage - checking if ready to search:', {
-      loading,
       hasSearched,
-      recipesCount,
-      inventoryCount,
-      isDataLoaded
+      isAuthenticated,
+      isInitialized,
+      hasSpreadsheetId: !!spreadsheetId,
+      searchLoading
     });
     
-    // Запускаем поиск если данные загружены и есть рецепты, но еще не искали или hasSearched был сброшен
-    if (!loading && !searchLoading && isDataLoaded && recipesCount > 0 && !hasSearched) {
-      console.log('RecipeSearchPage - data loaded, performing search...');
+    // Запускаем поиск если API готов и еще не искали
+    if (!searchLoading && !hasSearched && isAuthenticated && isInitialized && spreadsheetId) {
+      console.log('RecipeSearchPage - performing initial search...');
       performSearch();
     }
-  }, [loading, searchLoading, isDataLoaded, hasSearched, performSearch, recipesCount, inventoryCount]);
-
-  const getFilteredMatches = (): RecipeMatch[] => {
-    if (!groupedMatches) return [];
-
-    switch (filterMode) {
-      case 'cookable':
-        return matches.filter(m => m.can_cook);
-      case 'perfect':
-        return groupedMatches.perfect;
-      case 'high':
-        return [...groupedMatches.perfect, ...groupedMatches.high];
-      default:
-        return matches;
-    }
-  };
-
-  const filteredMatches = getFilteredMatches();
+  }, [searchLoading, hasSearched, isAuthenticated, isInitialized, performSearch]);
 
   const getMatchColor = (percentage: number): string => {
     if (percentage === 100) return 'bg-green-100 text-green-800 border-green-300';
@@ -109,12 +135,15 @@ export default function RecipeSearchPage() {
     return 'bg-gray-100 text-gray-800 border-gray-300';
   };
 
-  if (loading || searchLoading) {
+  // Показываем лоадер только при первой загрузке (не используем loading из хука, так как он срабатывает при каждой подгрузке)
+  const isInitialLoading = (searchLoading && !hasSearched) || (!hasSearched && isInitialized && isAuthenticated);
+  
+  if (isInitialLoading) {
     return (
       <main className="min-h-screen bg-gray-100 py-8">
         <div className="container mx-auto px-4 max-w-7xl">
           <p className="text-center text-gray-500 text-lg">
-            Поиск рецептов... (Рецептов: {recipesCount}, Товаров: {inventoryCount})
+            Поиск рецептов...
           </p>
         </div>
       </main>
@@ -155,7 +184,7 @@ export default function RecipeSearchPage() {
               </p>
             </div>
             <button
-              onClick={performSearch}
+              onClick={() => performSearch(true)}
               disabled={searchLoading}
               className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
             >
@@ -164,84 +193,11 @@ export default function RecipeSearchPage() {
           </div>
         </header>
 
-        {/* Статистика */}
-        {statistics && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="text-gray-600 text-sm">Всего рецептов</div>
-              <div className="text-3xl font-bold text-gray-800">{statistics.total}</div>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="text-gray-600 text-sm">Можно приготовить</div>
-              <div className="text-3xl font-bold text-green-600">{statistics.canCook}</div>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="text-gray-600 text-sm">Идеальные (100%)</div>
-              <div className="text-3xl font-bold text-blue-600">{statistics.perfectMatches}</div>
-            </div>
-            <div className="bg-white p-4 rounded-lg shadow">
-              <div className="text-gray-600 text-sm">Среднее совпадение</div>
-              <div className="text-3xl font-bold text-purple-600">{statistics.averageMatch}%</div>
-            </div>
-          </div>
-        )}
-
-        {/* Фильтры */}
-        <div className="bg-white p-4 rounded-lg shadow mb-6">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setFilterMode('all')}
-              className={`px-4 py-2 rounded-lg transition ${
-                filterMode === 'all'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              Все рецепты ({matches.length})
-            </button>
-            <button
-              onClick={() => setFilterMode('cookable')}
-              className={`px-4 py-2 rounded-lg transition ${
-                filterMode === 'cookable'
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              ✅ Можно готовить ({statistics?.canCook || 0})
-            </button>
-            <button
-              onClick={() => setFilterMode('perfect')}
-              className={`px-4 py-2 rounded-lg transition ${
-                filterMode === 'perfect'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              💯 Идеальные ({groupedMatches?.perfect.length || 0})
-            </button>
-            <button
-              onClick={() => setFilterMode('high')}
-              className={`px-4 py-2 rounded-lg transition ${
-                filterMode === 'high'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              ⭐ Высокое совпадение (75%+)
-            </button>
-          </div>
-        </div>
-
         {/* Список рецептов */}
-        {filteredMatches.length === 0 ? (
+        {matches.length === 0 && hasSearched ? (
           <div className="text-center py-12 bg-white rounded-lg shadow">
             <p className="text-gray-500 text-lg mb-4">
-              {filterMode === 'cookable'
-                ? 'Нет рецептов, которые можно приготовить прямо сейчас'
-                : 'Рецепты не найдены'}
-            </p>
-            <p className="text-gray-400 text-sm mb-4">
-              Рецептов в базе: {recipesCount}, Товаров в инвентаре: {inventoryCount}, Найдено совпадений: {matches.length}
+              Рецепты не найдены
             </p>
             <Link
               href="/recipes/new"
@@ -251,8 +207,9 @@ export default function RecipeSearchPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {filteredMatches.map((match) => (
+          <>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {matches.map((match) => (
               <div
                 key={match.recipe.recipe_id}
                 className="bg-white rounded-lg shadow hover:shadow-lg transition overflow-hidden"
@@ -362,23 +319,40 @@ export default function RecipeSearchPage() {
                       Открыть рецепт
                     </Link>
                     {match.missing_ingredients.length > 0 && (
-                      <Link
-                        href={`/shopping-list?recipe=${match.recipe.recipe_id}`}
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm"
+                      <button
+                        onClick={() => handleCreateShoppingList(match)}
+                        disabled={creatingShoppingList === match.recipe.recipe_id}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        title="Добавить в список покупок"
                       >
-                        🛒
-                      </Link>
+                        {creatingShoppingList === match.recipe.recipe_id ? '...' : '🛒'}
+                      </button>
                     )}
                   </div>
                 </div>
               </div>
             ))}
           </div>
-        )}
 
-        <div className="mt-6 text-center text-sm text-gray-500">
-          Показано: {filteredMatches.length} из {matches.length} рецептов
-        </div>
+          {/* Кнопка "Загрузить еще" */}
+          {hasMorePages && (
+            <div className="mt-8 flex justify-center">
+              <button
+                onClick={loadNextPage}
+                disabled={loadingMore}
+                className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed text-lg font-medium"
+              >
+                {loadingMore ? 'Загрузка...' : 'Загрузить еще'}
+              </button>
+            </div>
+          )}
+
+          {/* Информация */}
+          <div className="mt-6 text-center text-sm text-gray-500">
+            Показано рецептов: {matches.length}
+          </div>
+          </>
+        )}
       </div>
     </main>
   );

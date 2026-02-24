@@ -4,6 +4,7 @@ import type { Product, CreateProductInput } from '@/types/product';
 import { SHEET_NAMES } from './sheetsManager';
 import { logError } from '@/lib/errorLogger';
 import { storageService } from '@/lib/storageService';
+import { normalizeProductName } from '@/lib/utils/textUtils';
 
 /**
  * Сервис синхронизации справочника продуктов с Google Sheets
@@ -99,9 +100,13 @@ export class ProductsSyncService {
     this.checkGapi();
     this.ensureToken();
 
+    // Нормализуем название продукта: первая буква заглавная
+    const normalizedName = normalizeProductName(input.name);
+    
     const product: Product = {
       product_id: crypto.randomUUID(),
       ...input,
+      name: normalizedName,
       created_date: new Date().toISOString(),
       usage_count: input.usage_count || 0,
     };

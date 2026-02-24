@@ -10,6 +10,7 @@ import ProductAutocomplete from '@/components/ProductAutocomplete';
 import CategorySelector from '@/components/categories/CategorySelector';
 import GoogleApiStatus from '@/components/GoogleApiStatus';
 import { logError } from '@/lib/errorLogger';
+import { normalizeProductName } from '@/lib/utils/textUtils';
 import type { Recipe, RecipeIngredient } from '@/types/recipe';
 import type { Product } from '@/types/product';
 
@@ -123,9 +124,12 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
       return;
     }
 
-    // Ищем точное или частичное совпадение в списке продуктов
+    // Нормализуем название продукта
+    const normalizedName = normalizeProductName(trimmedInput);
+
+    // Ищем точное или частичное совпадение в списке продуктов (регистронезависимо)
     const matchingProduct = products.find(
-      p => p.name.toLowerCase() === trimmedInput.toLowerCase()
+      p => p.name.toLowerCase() === normalizedName.toLowerCase()
     );
 
     if (matchingProduct) {
@@ -134,7 +138,7 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
       // Создаем временный продукт, который будет создан при сохранении рецепта
       const tempProductId = `temp_${Date.now()}`;
       
-      if (ingredients.some(ing => ing.productName.toLowerCase() === trimmedInput.toLowerCase())) {
+      if (ingredients.some(ing => ing.productName.toLowerCase() === normalizedName.toLowerCase())) {
         alert('Этот продукт уже добавлен в список ингредиентов');
         setNewIngredientInput('');
         return;
@@ -144,7 +148,7 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
         ...ingredients,
         {
           productId: tempProductId,
-          productName: trimmedInput,
+          productName: normalizedName,
           quantity: 1,
           unit: 'шт',
           optional: false,

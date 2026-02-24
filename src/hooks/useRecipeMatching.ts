@@ -1,31 +1,31 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRecipes } from './useRecipes';
 import { useGoogleApi } from '@/components/GoogleApiProvider';
-import { getRecipeMatcherService } from '@/lib/recipeMatcher';
-import { getInventorySyncService } from '@/lib/googleSheets/inventorySync';
+import { getRecipeMatchesSyncService } from '@/lib/googleSheets/recipeMatchesSync';
 import { storageService } from '@/lib/storageService';
 import type { RecipeMatch } from '@/types/recipe';
-import type { InventoryItemWithProduct } from '@/types/inventory';
 
 /**
- * Хук для поиска рецептов по наличию продуктов в холодильнике
+ * Хук для получения результатов подбора рецептов из Google Sheets
+ * Данные рассчитываются автоматически Google Apps Script
  */
 export function useRecipeMatching() {
-  const { recipes: allRecipes, loading: recipesLoading } = useRecipes();
   const { isAuthenticated, isInitialized } = useGoogleApi();
-  const [inventory, setInventory] = useState<InventoryItemWithProduct[]>([]);
+  const [matches, setMatches] = useState<RecipeMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  const matcherService = useMemo(() => getRecipeMatcherService(), []);
-  const inventoryService = useMemo(() => getInventorySyncService(), []);
+  const matchesService = useMemo(() => getRecipeMatchesSyncService(), []);
 
   /**
-   * Загрузить инвентарь с продуктами (JOIN)
+   * Загрузить все результаты подбора рецептов из Google Sheets
+   * @param forceRefresh Принудительное обновление
+   * @param limit Количество записей для загрузки
+   * @param offset Смещение
    */
-  const loadInventory = useCallback(async () => {
+  const loadMatches = useCallback(async (forceRefresh: boolean = false, limit: number = 20, offset: number = 0) => {
     setLoading(true);
     setError(null);
 
@@ -35,151 +35,95 @@ export function useRecipeMatching() {
         throw new Error('Spreadsheet ID не настроен');
       }
 
-      console.log('useRecipeMatching - loadInventory: fetching inventory...');
-      const items = await inventoryService.getInventoryWithProducts(spreadsheetId);
-      console.log('useRecipeMatching - loadInventory: loaded', items.length, 'items');
-      setInventory(items);
+      // Если требуется принудительное обновление, очищаем кэш
+      if (forceRefresh) {
+        console.log('🔄 Force refresh - clearing cache');
+        matchesService.clearAllCache();
+      }
+
+      console.log(`📊 Loading recipe matches from Google Sheets (limit: ${limit}, offset: ${offset})...`);
+      const [allMatches, updateTime] = await Promise.all([
+        matchesService.getAllMatches(spreadsheetId, limit, offset),
+        matchesService.getLastUpdateTime(spreadsheetId),
+      ]);
+      
+      console.log(`✅ Loaded ${allMatches.length} recipe matches`);
+      setMatches(allMatches);
+      setLastUpdate(updateTime);
+      
+      return allMatches;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Неизвестная ошибка';
       setError(errorMessage);
-      console.error('Failed to load inventory:', err);
+      console.error('Failed to load recipe matches:', err);
+      return [];
     } finally {
       setLoading(false);
     }
-  }, [inventoryService]);
+  }, [matchesService]);
 
   /**
    * Сопоставить один конкретный рецепт с инвентарем
    */
   const matchRecipe = useCallback(
     async (recipeId: string): Promise<RecipeMatch | null> => {
-      console.log('matchRecipe called:', {
-        recipeId,
-        allRecipesCount: allRecipes.length,
-        inventoryCount: inventory.length,
-        recipesLoading
-      });
+      console.log('matchRecipe called:', { recipeId });
       
-      try {
-        const spreadsheetId = storageService.getSpreadsheetId();
-        if (!spreadsheetId) {
-          throw new Error('Spreadsheet ID не настроен');
-        }
-
-        // Найти рецепт
-        const recipe = allRecipes.find(r => r.recipe_id === recipeId);
-        if (!recipe) {
-          console.error('Recipe not found in allRecipes:', recipeId, 'Available recipes:', allRecipes.map(r => r.recipe_id));
-          return null;
-        }
-        
-        console.log('Recipe found:', recipe.name);
-
-        // Загрузить ингредиенты
-        console.log('Loading ingredients for recipe...');
-        const recipeProductsService = await import('@/lib/googleSheets/recipeProductsSync');
-        const ingredients = await recipeProductsService
-          .getRecipeProductsSyncService()
-          .getIngredientsWithProducts(spreadsheetId, recipeId);
-
-        console.log('Ingredients loaded:', ingredients.length);
-
-        const recipeWithIngredients = {
-          ...recipe,
-          ingredients,
-        };
-
-        console.log('Calling matcherService.matchRecipe...');
-        const result = matcherService.matchRecipe(recipeWithIngredients, inventory);
-        console.log('matchRecipe result:', result);
-        return result;
-      } catch (err) {
-        console.error(`Failed to match recipe ${recipeId}:`, err);
-        return null;
+      // Сначала пытаемся найти в уже загруженных данных
+      const existing = matches.find(m => m.recipe.recipe_id === recipeId);
+      if (existing) {
+        return existing;
       }
+
+      // Если нет в загруженных, загружаем все и ищем
+      await loadMatches();
+      return matches.find(m => m.recipe.recipe_id === recipeId) || null;
     },
-    [allRecipes, inventory, matcherService, recipesLoading]
+    [matches, loadMatches]
   );
 
   /**
-   * Сопоставить все рецепты с текущим инвентарем
+   * Получить все результаты подбора рецептов
+   * @param limit Количество записей для загрузки
+   * @param offset Смещение
    */
-  const matchAllRecipes = useCallback(async (): Promise<RecipeMatch[]> => {
-    console.log('matchAllRecipes - called with:', {
-      recipesCount: allRecipes.length,
-      inventoryCount: inventory.length,
-      recipesLoading
-    });
-    
-    if (allRecipes.length === 0) {
-      console.log('matchAllRecipes - no recipes, returning empty array');
-      return [];
-    }
-
-    // Загружаем детали всех рецептов с ингредиентами
-    const recipesWithIngredients = await Promise.all(
-      allRecipes.map(async (recipe) => {
-        // Здесь нужно загрузить ингредиенты для каждого рецепта
-        // Используем getRecipeWithIngredients из useRecipes
-        try {
-          const spreadsheetId = storageService.getSpreadsheetId();
-          if (!spreadsheetId) return null;
-
-          const recipeProductsService = await import('@/lib/googleSheets/recipeProductsSync');
-          const ingredients = await recipeProductsService
-            .getRecipeProductsSyncService()
-            .getIngredientsWithProducts(spreadsheetId, recipe.recipe_id);
-
-          return {
-            ...recipe,
-            ingredients,
-          };
-        } catch (err) {
-          console.error(`Failed to load ingredients for recipe ${recipe.recipe_id}:`, err);
-          return null;
-        }
-      })
-    );
-
-    const validRecipes = recipesWithIngredients.filter(
-      (r): r is NonNullable<typeof r> => r !== null
-    );
-
-    return matcherService.matchRecipes(validRecipes, inventory);
-  }, [allRecipes, inventory, matcherService, recipesLoading]);
+  const matchAllRecipes = useCallback(async (limit: number = 20, offset: number = 0): Promise<RecipeMatch[]> => {
+    // Загружаем с указанными параметрами пагинации
+    return await loadMatches(false, limit, offset);
+  }, [loadMatches]);
 
   /**
    * Получить рекомендованные рецепты (>=60% совпадения)
    */
   const getRecommendedRecipes = useCallback(
     async (limit: number = 10): Promise<RecipeMatch[]> => {
-      const matches = await matchAllRecipes();
-      return matcherService.getRecommendedRecipes(
-        matches.map(m => m.recipe),
-        inventory,
-        limit
-      );
+      const allMatches = await matchAllRecipes();
+      return allMatches
+        .filter(m => m.match_percentage >= 60)
+        .slice(0, limit);
     },
-    [matchAllRecipes, inventory, matcherService]
+    [matchAllRecipes]
   );
 
   /**
    * Получить рецепты, которые можно приготовить (все обязательные ингредиенты есть)
    */
   const getCookableRecipes = useCallback(async (): Promise<RecipeMatch[]> => {
-    const matches = await matchAllRecipes();
-    return matcherService.filterCookableRecipes(matches);
-  }, [matchAllRecipes, matcherService]);
+    const spreadsheetId = storageService.getSpreadsheetId();
+    if (!spreadsheetId) return [];
+    
+    return matchesService.getCookableMatches(spreadsheetId);
+  }, [matchesService]);
 
   /**
    * Найти рецепты по минимальному проценту совпадения
    */
   const findRecipesByMatchPercentage = useCallback(
     async (minPercentage: number): Promise<RecipeMatch[]> => {
-      const matches = await matchAllRecipes();
-      return matcherService.filterByMatchPercentage(matches, minPercentage);
+      const allMatches = await matchAllRecipes();
+      return allMatches.filter(m => m.match_percentage >= minPercentage);
     },
-    [matchAllRecipes, matcherService]
+    [matchAllRecipes]
   );
 
   /**
@@ -187,8 +131,8 @@ export function useRecipeMatching() {
    */
   const findRecipesByCategory = useCallback(
     async (category: string): Promise<RecipeMatch[]> => {
-      const matches = await matchAllRecipes();
-      return matches.filter(match =>
+      const allMatches = await matchAllRecipes();
+      return allMatches.filter(match =>
         match.recipe.categories
           .toLowerCase()
           .split(',')
@@ -203,43 +147,34 @@ export function useRecipeMatching() {
    */
   const getMatchStatistics = useCallback(
     async () => {
-      const matches = await matchAllRecipes();
-      return matcherService.getMatchStatistics(matches);
+      const spreadsheetId = storageService.getSpreadsheetId();
+      if (!spreadsheetId) {
+        return { total: 0, canCook: 0, averageMatch: 0, perfectMatches: 0 };
+      }
+      
+      return matchesService.getStatistics(spreadsheetId);
     },
-    [matchAllRecipes, matcherService]
+    [matchesService]
   );
 
   /**
    * Сгруппировать рецепты по проценту совпадения
    */
   const groupRecipesByMatch = useCallback(async () => {
-    const matches = await matchAllRecipes();
-    return matcherService.groupByMatchPercentage(matches);
-  }, [matchAllRecipes, matcherService]);
-
-  // Автоматически загружаем инвентарь после инициализации API
-  useEffect(() => {
     const spreadsheetId = storageService.getSpreadsheetId();
-    console.log('useRecipeMatching - checking load conditions:', {
-      spreadsheetId,
-      isAuthenticated,
-      isInitialized
-    });
-
-    if (isAuthenticated && isInitialized && spreadsheetId) {
-      console.log('useRecipeMatching - loading inventory...');
-      loadInventory();
+    if (!spreadsheetId) {
+      return { perfect: [], high: [], medium: [], low: [] };
     }
-  }, [isAuthenticated, isInitialized, loadInventory]);
+    
+    return matchesService.getGroupedMatches(spreadsheetId);
+  }, [matchesService]);
 
   return {
-    inventory,
-    loading: loading || recipesLoading,
+    matches,
+    loading,
     error,
-    recipesCount: allRecipes.length,
-    inventoryCount: inventory.length,
-    isDataLoaded: allRecipes.length > 0 || inventory.length > 0,
-    loadInventory,
+    lastUpdate,
+    loadMatches,
     matchRecipe,
     matchAllRecipes,
     getRecommendedRecipes,

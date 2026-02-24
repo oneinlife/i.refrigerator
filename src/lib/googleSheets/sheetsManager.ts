@@ -34,6 +34,7 @@ export const SHEET_NAMES = {
   RECIPE_PRODUCTS: 'RecipeProducts',
   SHOPPING_LIST: 'ShoppingList',
   CATEGORIES: 'Categories',
+  RECIPE_MATCHES: 'RecipeMatches',
 } as const;
 
 /**
@@ -98,6 +99,24 @@ export const SHEET_HEADERS: Record<string, string[]> = {
     'type',
     'usage_count',
     'created_date',
+  ],
+  [SHEET_NAMES.RECIPE_MATCHES]: [
+    'recipe_id',
+    'recipe_name',
+    'recipe_description',
+    'recipe_servings',
+    'recipe_cooking_time',
+    'recipe_categories',
+    'recipe_image_url',
+    'recipe_tags',
+    'match_percentage',
+    'available_ingredients_count',
+    'missing_ingredients_count',
+    'total_ingredients_count',
+    'available_ingredients',
+    'missing_ingredients',
+    'can_cook',
+    'last_updated',
   ],
 };
 

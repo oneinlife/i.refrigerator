@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getShoppingListSyncService } from '@/lib/googleSheets/shoppingListSync';
 import { getInventorySyncService } from '@/lib/googleSheets/inventorySync';
-import { getProductsSyncService } from '@/lib/googleSheets/productsSync';
 import { storageService } from '@/lib/storageService';
 import { convertToBaseUnit } from '@/lib/unitConverter';
+import { useGoogleApi } from '@/components/GoogleApiProvider';
 import type { 
   ShoppingListItem, 
   ShoppingListItemWithDetails, 
@@ -13,7 +13,6 @@ import type {
   GroupedShoppingList 
 } from '@/types/shopping';
 import type { RecipeMatch } from '@/types/recipe';
-import type { Product } from '@/types/product';
 
 interface UseShoppingListResult {
   items: ShoppingListItemWithDetails[];
@@ -43,6 +42,7 @@ interface UseShoppingListResult {
 }
 
 export function useShoppingList(): UseShoppingListResult {
+  const { isAuthenticated, isInitialized } = useGoogleApi();
   const [items, setItems] = useState<ShoppingListItemWithDetails[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +57,7 @@ export function useShoppingList(): UseShoppingListResult {
 
   /**
    * Загрузить список покупок с деталями о продуктах
+   * product_name загружается из формулы в Google Sheets (столбец K)
    */
   const loadShoppingList = useCallback(async () => {
     if (!spreadsheetId) {
@@ -69,23 +70,22 @@ export function useShoppingList(): UseShoppingListResult {
 
     try {
       const shoppingListSync = getShoppingListSyncService();
-      const productsSync = getProductsSyncService();
       
-      const [shoppingItems, products] = await Promise.all([
-        shoppingListSync.getAllItems(spreadsheetId),
-        productsSync.getAllProducts(spreadsheetId),
-      ]);
+      // Загружаем только список покупок
+      // product_name уже приходит из формулы в столбце K
+      const shoppingItems = await shoppingListSync.getAllItems(spreadsheetId);
       
       // Сохраняем в localStorage
-      storageService.setShoppingList(shoppingItems);
+      if (shoppingItems.length > 0) {
+        storageService.setShoppingList(shoppingItems);
+      }
       
-      const productMap = new Map(products.map(p => [p.product_id, p]));
-      
+      // Формируем элементы с деталями продукта из product_name (из формулы)
       const itemsWithDetails: ShoppingListItemWithDetails[] = shoppingItems.map(item => ({
         ...item,
-        product: productMap.get(item.product_id) || {
+        product: {
           product_id: item.product_id,
-          name: 'Unknown Product',
+          name: item.product_name || 'Unknown Product',
           category: 'Другое',
           default_unit: item.unit,
           created_date: new Date().toISOString(),
@@ -94,20 +94,20 @@ export function useShoppingList(): UseShoppingListResult {
       }));
       
       setItems(itemsWithDetails);
+      console.log(`✅ Loaded ${itemsWithDetails.length} shopping items`);
     } catch (err) {
-      console.error('Failed to load shopping list from Google Sheets:', err);
-      console.log('Loading from localStorage (offline mode)...');
+      const message = err instanceof Error ? err.message : 'Failed to load shopping list';
+      console.error('❌ Failed to load shopping list from Google Sheets:', err);
+      console.log('📦 Loading from localStorage (offline mode)...');
       
       // В случае ошибки загружаем из localStorage (офлайн режим)
       const cachedItems = storageService.getShoppingList();
       if (cachedItems.length > 0) {
-        // Пытаемся загрузить продукты для отображения деталей
-        const productMap = new Map<string, Product>();
         const itemsWithDetails: ShoppingListItemWithDetails[] = cachedItems.map(item => ({
           ...item,
-          product: productMap.get(item.product_id) || {
+          product: {
             product_id: item.product_id,
-            name: 'Unknown Product',
+            name: item.product_name || 'Unknown Product (offline)',
             category: 'Другое',
             default_unit: item.unit,
             created_date: new Date().toISOString(),
@@ -115,10 +115,9 @@ export function useShoppingList(): UseShoppingListResult {
           },
         }));
         setItems(itemsWithDetails);
-        setError('Работа в офлайн режиме');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load shopping list');
+        console.log(`📦 Loaded ${cachedItems.length} items from localStorage`);
       }
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -286,28 +285,37 @@ export function useShoppingList(): UseShoppingListResult {
     setLoading(true);
     setError(null);
 
-    // Обновляем локально сразу для быстрого отклика
-    const cachedItems = storageService.getShoppingList();
-    const itemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
-    if (itemIndex !== -1) {
-      cachedItems[itemIndex].checked = true;
-      cachedItems[itemIndex].purchased_date = new Date().toISOString();
-      storageService.setShoppingList(cachedItems);
-    }
-
     try {
       const shoppingListSync = getShoppingListSyncService();
       await shoppingListSync.markAsChecked(spreadsheetId, shoppingItemId);
-      await loadShoppingList();
+      
+      // Обновляем только после успешного ответа API
+      const purchasedDate = new Date().toISOString();
+      
+      // Обновляем localStorage
+      const cachedItems = storageService.getShoppingList();
+      const cachedItemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
+      if (cachedItemIndex !== -1) {
+        cachedItems[cachedItemIndex].checked = true;
+        cachedItems[cachedItemIndex].purchased_date = purchasedDate;
+        storageService.setShoppingList(cachedItems);
+      }
+      
+      // Обновляем state
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.shopping_item_id === shoppingItemId
+            ? { ...item, checked: true, purchased_date: purchasedDate }
+            : item
+        )
+      );
     } catch (err) {
       console.error('Failed to mark as checked in Google Sheets:', err);
-      console.log('Item marked locally (offline mode)');
-      // Оставляем локальное изменение, просто обновляем отображение
-      await loadShoppingList();
+      setError(err instanceof Error ? err.message : 'Failed to mark as checked');
     } finally {
       setLoading(false);
     }
-  }, [spreadsheetId, loadShoppingList]);
+  }, [spreadsheetId]);
 
   /**
    * Снять отметку с элемента
@@ -318,28 +326,36 @@ export function useShoppingList(): UseShoppingListResult {
     setLoading(true);
     setError(null);
 
-    // Обновляем локально сразу для быстрого отклика
-    const cachedItems = storageService.getShoppingList();
-    const itemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
-    if (itemIndex !== -1) {
-      cachedItems[itemIndex].checked = false;
-      cachedItems[itemIndex].purchased_date = undefined;
-      storageService.setShoppingList(cachedItems);
-    }
-
     try {
       const shoppingListSync = getShoppingListSyncService();
       await shoppingListSync.unmarkChecked(spreadsheetId, shoppingItemId);
-      await loadShoppingList();
+      
+      // Обновляем только после успешного ответа API
+      
+      // Обновляем localStorage
+      const cachedItems = storageService.getShoppingList();
+      const cachedItemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
+      if (cachedItemIndex !== -1) {
+        cachedItems[cachedItemIndex].checked = false;
+        cachedItems[cachedItemIndex].purchased_date = undefined;
+        storageService.setShoppingList(cachedItems);
+      }
+      
+      // Обновляем state
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.shopping_item_id === shoppingItemId
+            ? { ...item, checked: false, purchased_date: undefined }
+            : item
+        )
+      );
     } catch (err) {
       console.error('Failed to unmark checked in Google Sheets:', err);
-      console.log('Item unmarked locally (offline mode)');
-      // Оставляем локальное изменение, просто обновляем отображение
-      await loadShoppingList();
+      setError(err instanceof Error ? err.message : 'Failed to unmark checked');
     } finally {
       setLoading(false);
     }
-  }, [spreadsheetId, loadShoppingList]);
+  }, [spreadsheetId]);
 
   /**
    * Удалить элемент из списка покупок
@@ -478,13 +494,15 @@ export function useShoppingList(): UseShoppingListResult {
     unchecked: items.filter(item => !item.checked).length,
   };
 
-  // Загрузить список покупок при монтировании
+  /**
+   * Автозагрузка при монтировании и авторизации
+   */
   useEffect(() => {
-    if (spreadsheetId) {
+    if (spreadsheetId && isAuthenticated && isInitialized) {
+      console.log('🔄 Syncing shopping list from Google Sheets...');
       loadShoppingList();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spreadsheetId]); // Не включаем loadShoppingList в зависимости, чтобы избежать бесконечного цикла
+  }, [spreadsheetId, loadShoppingList, isAuthenticated, isInitialized]);
 
   return {
     items,
