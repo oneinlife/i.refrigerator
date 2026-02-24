@@ -2,6 +2,7 @@
 
 import type { RecipeWithIngredients, RecipeMatch, RecipeIngredientWithProduct } from '@/types/recipe';
 import type { InventoryItemWithProduct } from '@/types/inventory';
+import { hasEnoughQuantity as checkQuantity, convertToBaseUnit } from './unitConverter';
 
 /**
  * Сервис для сопоставления рецептов с инвентарем холодильника
@@ -61,17 +62,25 @@ export class RecipeMatcherService {
         missingIngredients.push(ingredient);
         
         // Вычисляем недостающее количество
-        const missing = inventoryItem
-          ? Math.max(0, ingredient.quantity - inventoryItem.quantity)
-          : ingredient.quantity;
+        // Конвертируем оба значения в базовую единицу ингредиента для точного расчета
+        const ingredientBase = convertToBaseUnit(ingredient.quantity, ingredient.unit);
+        let missing = ingredientBase.quantity;
 
-        console.log('  Missing quantity:', missing);
+        if (inventoryItem) {
+          const inventoryBase = convertToBaseUnit(inventoryItem.quantity, inventoryItem.unit);
+          // Если единицы совместимы, вычисляем разницу
+          if (inventoryBase.unit === ingredientBase.unit) {
+            missing = Math.max(0, ingredientBase.quantity - inventoryBase.quantity);
+          }
+        }
+
+        console.log('  Missing quantity:', missing, ingredientBase.unit);
 
         missingQuantities.push({
           product_id: ingredient.product_id,
           product_name: ingredient.product.name,
           missing,
-          unit: ingredient.unit,
+          unit: ingredientBase.unit, // Используем базовую единицу
         });
       }
     }
@@ -124,36 +133,35 @@ export class RecipeMatcherService {
     ingredient: RecipeIngredientWithProduct,
     inventoryItem: InventoryItemWithProduct
   ): boolean {
-    const normalizedIngredientUnit = this.normalizeUnit(ingredient.unit);
-    const normalizedInventoryUnit = this.normalizeUnit(inventoryItem.unit);
-    
     console.log('    hasEnoughQuantity check:', {
+      ingredient_quantity: ingredient.quantity,
       ingredient_unit: ingredient.unit,
+      inventory_quantity: inventoryItem.quantity,
       inventory_unit: inventoryItem.unit,
-      normalized_ingredient: normalizedIngredientUnit,
-      normalized_inventory: normalizedInventoryUnit,
-      units_match: normalizedIngredientUnit === normalizedInventoryUnit
     });
     
-    // Если единицы измерения совпадают, сравниваем напрямую
-    if (normalizedIngredientUnit === normalizedInventoryUnit) {
-      const hasEnough = inventoryItem.quantity >= ingredient.quantity;
-      console.log('    Units match, comparing quantities:', {
-        required: ingredient.quantity,
-        available: inventoryItem.quantity,
-        hasEnough
-      });
-      return hasEnough;
+    // Используем утилиту для проверки достаточности количества
+    const result = checkQuantity(
+      inventoryItem.quantity,
+      inventoryItem.unit,
+      ingredient.quantity,
+      ingredient.unit
+    );
+    
+    // Если единицы несовместимы (null), считаем что продукт есть
+    // (пользователь сам решит, хватит ли ему)
+    if (result === null) {
+      console.log('    Units are incompatible, assuming sufficient');
+      return true;
     }
-
-    // Если единицы разные, считаем что продукт есть
-    // (т.к. точное преобразование единиц измерения сложно без дополнительных данных)
-    console.log('    Units differ, assuming sufficient (TODO: unit conversion)');
-    return true;
+    
+    console.log('    Result:', result);
+    return result;
   }
 
   /**
    * Нормализовать единицу измерения для сравнения
+   * @deprecated Используйте функции из unitConverter.ts
    */
   private normalizeUnit(unit: string): string {
     const normalized = unit.toLowerCase().trim();

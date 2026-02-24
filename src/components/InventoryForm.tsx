@@ -11,9 +11,11 @@ interface InventoryFormProps {
   onSubmit: (item: CreateInventoryInput) => void;
   editItem?: InventoryItem | null;
   onProductCreated?: () => void;
+  hideTitle?: boolean;
+  onCancel?: () => void;
 }
 
-export default function InventoryForm({ onSubmit, editItem, onProductCreated }: InventoryFormProps) {
+export default function InventoryForm({ onSubmit, editItem, onProductCreated, hideTitle = false, onCancel }: InventoryFormProps) {
   const { products, loading: productsLoading, getOrCreateProduct } = useProducts();
   
   // Для отображения в UI храним выбранный продукт
@@ -96,10 +98,12 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated }: 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-4 md:p-6 rounded-lg shadow-md mb-6">
-      <h2 className="text-xl md:text-2xl font-bold mb-4">
-        {editItem ? 'Редактировать продукт' : 'Добавить продукт'}
-      </h2>
+    <form onSubmit={handleSubmit} className="bg-white rounded-lg">
+      {!hideTitle && (
+        <h2 className="text-xl md:text-2xl font-bold mb-4">
+          {editItem ? '✏️ Редактировать продукт' : '➕ Добавить продукт'}
+        </h2>
+      )}
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="md:col-span-2">
@@ -131,17 +135,9 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated }: 
             placeholder="Начните вводить название продукта..."
             required
           />
-          <p className="text-xs text-gray-500 mt-1">
-            Выберите продукт из справочника. Если продукта нет, сначала добавьте его в разделе &ldquo;📦 Справочник&rdquo;
-          </p>
           <p className="text-xs text-blue-600 mt-1">
-            Новые продукты будут автоматически добавлены в справочник
+            💡 Начните вводить название. Новые продукты будут автоматически добавлены в справочник.
           </p>
-          {selectedProduct && (
-            <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm">
-              <span className="font-medium">{selectedProduct.name}</span>
-            </div>
-          )}
         </div>
 
         <div>
@@ -194,12 +190,23 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated }: 
         </div>
       </div>
 
-      <button
-        type="submit"
-        className="mt-4 w-full sm:w-auto px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-      >
-        {editItem ? 'Сохранить изменения' : 'Добавить'}
-      </button>
+      <div className="flex flex-col sm:flex-row gap-3 mt-4">
+        <button
+          type="submit"
+          className="flex-1 px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition font-medium"
+        >
+          {editItem ? 'Сохранить изменения' : 'Добавить'}
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 sm:flex-initial px-6 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition"
+          >
+            Отменить
+          </button>
+        )}
+      </div>
     </form>
   );
 }

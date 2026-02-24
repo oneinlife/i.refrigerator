@@ -79,6 +79,24 @@ export class ClientGoogleSheetsService {
     // Проверяем существующий токен
     const existingToken = storageService.getGoogleToken();
     if (existingToken && (window as any).gapi?.client) {
+      // Сначала проверяем время истечения токена (быстрая локальная проверка)
+      if (storageService.isGoogleTokenExpired()) {
+        console.log('🔄 Токен истек, обновляем автоматически...');
+        // Пытаемся обновить токен автоматически
+        this.refreshTokenSilently()
+          .then(() => {
+            console.log('✅ Токен успешно обновлен при входе');
+            callback(true);
+          })
+          .catch((error) => {
+            console.warn('⚠️ Не удалось обновить токен автоматически:', error);
+            // Если не удалось обновить автоматически, запрашиваем новый с показом окна
+            storageService.removeGoogleToken();
+            this.requestNewToken(callback);
+          });
+        return;
+      }
+
       try {
         (window as any).gapi.client.setToken({ access_token: existingToken });
         // Проверяем, валиден ли токен, выполнив простой запрос
@@ -124,7 +142,8 @@ export class ClientGoogleSheetsService {
         return;
       }
       const token = response.access_token;
-      storageService.setGoogleToken(token);
+      const expiresIn = response.expires_in || 3600; // по умолчанию 1 час
+      storageService.setGoogleToken(token, expiresIn);
       (window as any).gapi.client.setToken({ access_token: token });
       callback(true);
     };
@@ -297,8 +316,58 @@ export class ClientGoogleSheetsService {
     if (!token) {
       throw new Error('Not authenticated. Please sign in with Google.');
     }
+
+    // Проверяем, не истек ли токен
+    if (storageService.isGoogleTokenExpired()) {
+      console.log('⚠️ Токен истек, пытаемся обновить автоматически...');
+      try {
+        // Пытаемся автоматически обновить токен
+        await this.refreshTokenSilently();
+        console.log('✅ Токен успешно обновлен');
+      } catch (error) {
+        console.warn('⚠️ Не удалось автоматически обновить токен:', error);
+        // Не выбрасываем ошибку - пусть попробует выполнить запрос с текущим токеном
+        // Если токен действительно невалиден, API вернет 401 и пользователь увидит сообщение
+      }
+    }
     
-    (window as any).gapi.client.setToken({ access_token: token });
+    (window as any).gapi.client.setToken({ access_token: storageService.getGoogleToken() });
+  }
+
+  private async refreshTokenSilently(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.tokenClient) {
+        reject(new Error('Token client not initialized'));
+        return;
+      }
+
+      // Таймаут на случай если окно авторизации зависнет
+      const timeout = setTimeout(() => {
+        reject(new Error('Token refresh timeout'));
+      }, 10000); // 10 секунд
+
+      this.tokenClient.callback = (response: any) => {
+        clearTimeout(timeout);
+        
+        if (response.error) {
+          console.error('Не удалось обновить токен:', response.error);
+          reject(new Error(response.error));
+          return;
+        }
+        const token = response.access_token;
+        const expiresIn = response.expires_in || 3600;
+        storageService.setGoogleToken(token, expiresIn);
+        resolve();
+      };
+
+      try {
+        // Обновляем токен без показа окна (если пользователь уже давал разрешение)
+        this.tokenClient.requestAccessToken({ prompt: '' });
+      } catch (error: any) {
+        clearTimeout(timeout);
+        reject(new Error(error.message || 'Failed to refresh token'));
+      }
+    });
   }
 
   isAuthenticated(): boolean {

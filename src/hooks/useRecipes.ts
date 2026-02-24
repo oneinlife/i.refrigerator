@@ -5,6 +5,7 @@ import { getRecipesSyncService } from '@/lib/googleSheets/recipesSync';
 import { getRecipeProductsSyncService } from '@/lib/googleSheets/recipeProductsSync';
 import { storageService } from '@/lib/storageService';
 import { useGoogleApi } from '@/components/GoogleApiProvider';
+import { convertToBaseUnit } from '@/lib/unitConverter';
 import type { Recipe, RecipeWithIngredients, RecipeIngredient } from '@/types/recipe';
 
 /**
@@ -123,9 +124,24 @@ export function useRecipes() {
         // Добавить рецепт
         const newRecipe = await recipesService.addRecipe(spreadsheetId, recipe);
 
+        // Конвертировать единицы измерения ингредиентов в базовые
+        const normalizedIngredients = ingredients.map(ing => {
+          const converted = convertToBaseUnit(ing.quantity, ing.unit);
+          console.log('🔄 Recipe ingredient unit conversion:', {
+            product_id: ing.product_id,
+            original: `${ing.quantity} ${ing.unit}`,
+            converted: `${converted.quantity} ${converted.unit}`
+          });
+          return {
+            ...ing,
+            quantity: converted.quantity,
+            unit: converted.unit,
+          };
+        });
+
         // Добавить ингредиенты
-        if (ingredients.length > 0) {
-          const ingredientsWithRecipeId = ingredients.map(ing => ({
+        if (normalizedIngredients.length > 0) {
+          const ingredientsWithRecipeId = normalizedIngredients.map(ing => ({
             ...ing,
             recipe_id: newRecipe.recipe_id,
           }));
@@ -173,12 +189,26 @@ export function useRecipes() {
           return false;
         }
 
-        // Если переданы новые ингредиенты - заменить их
+        // Если переданы новые ингредиенты - конвертировать единицы и заменить их
         if (ingredientsUpdate) {
+          const normalizedIngredients = ingredientsUpdate.map(ing => {
+            const converted = convertToBaseUnit(ing.quantity, ing.unit);
+            console.log('🔄 Recipe ingredient update unit conversion:', {
+              product_id: ing.product_id,
+              original: `${ing.quantity} ${ing.unit}`,
+              converted: `${converted.quantity} ${converted.unit}`
+            });
+            return {
+              ...ing,
+              quantity: converted.quantity,
+              unit: converted.unit,
+            };
+          });
+
           await recipeProductsService.replaceRecipeIngredients(
             spreadsheetId,
             recipeId,
-            ingredientsUpdate
+            normalizedIngredients
           );
         }
 

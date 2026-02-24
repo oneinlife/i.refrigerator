@@ -8,7 +8,6 @@ import { storageService } from '@/lib/storageService';
 
 /**
  * Сервис синхронизации инвентаря с Google Sheets
- * Работает с новой структурой данных (Inventory + Products)
  */
 export class InventorySyncService {
   /**
@@ -39,7 +38,11 @@ export class InventorySyncService {
    */
   private ensureToken(): void {
     const token = storageService.getGoogleToken();
-    if (token && this.gapi?.client) {
+    if (!token) {
+      throw new Error('Not authenticated. Please sign in with Google.');
+    }
+
+    if (this.gapi?.client) {
       this.gapi.client.setToken({ access_token: token });
     }
   }

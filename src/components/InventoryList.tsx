@@ -8,9 +8,10 @@ interface InventoryListProps {
   items: InventoryItemWithProduct[];
   onDelete: (id: string) => void;
   onEdit: (item: InventoryItemWithProduct) => void;
+  onAddNew?: () => void;
 }
 
-export default function InventoryList({ items, onDelete, onEdit }: InventoryListProps) {
+export default function InventoryList({ items, onDelete, onEdit, onAddNew }: InventoryListProps) {
   const isExpiringSoon = (expiryDate?: string) => {
     if (!expiryDate) return false;
     const expiry = new Date(expiryDate);
@@ -34,9 +35,24 @@ export default function InventoryList({ items, onDelete, onEdit }: InventoryList
 
   if (items.length === 0) {
     return (
-      <div className="text-center py-12 bg-gray-50 rounded-lg">
-        <p className="text-gray-500 text-lg">Инвентарь пуст</p>
-        <p className="text-gray-400 text-sm mt-2">Добавьте первый продукт</p>
+      <div className="text-center py-16 bg-white rounded-lg shadow-md border-2 border-dashed border-gray-300">
+        <div className="max-w-md mx-auto px-4">
+          <div className="text-6xl mb-4">🥶</div>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">
+            Ваш холодильник пуст
+          </h3>
+          <p className="text-gray-600 mb-6">
+            Начните добавлять продукты, чтобы отслеживать их количество и сроки годности
+          </p>
+          {onAddNew && (
+            <button
+              onClick={onAddNew}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium shadow-md"
+            >
+              ➕ Добавить первый продукт
+            </button>
+          )}
+        </div>
       </div>
     );
   }

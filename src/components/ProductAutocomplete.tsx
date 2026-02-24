@@ -30,6 +30,7 @@ export default function ProductAutocomplete({
   const [isOpen, setIsOpen] = useState(false);
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [userInteracted, setUserInteracted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -69,12 +70,14 @@ export default function ProductAutocomplete({
     });
 
     setFilteredProducts(filtered.slice(0, 10)); // Показываем до 10 результатов
-    // Открываем dropdown даже если результатов нет - покажем сообщение о создании
-    setIsOpen(true);
+    // Открываем dropdown только если пользователь взаимодействовал с полем
+    if (userInteracted) {
+      setIsOpen(true);
+    }
     setHighlightedIndex(-1);
     
-    console.log('ProductAutocomplete - filtered:', filtered.length, 'isOpen:', true);
-  }, [value, products]);
+    console.log('ProductAutocomplete - filtered:', filtered.length, 'isOpen:', userInteracted);
+  }, [value, products, userInteracted]);
 
   // Закрытие при клике вне компонента
   useEffect(() => {
@@ -94,13 +97,30 @@ export default function ProductAutocomplete({
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUserInteracted(true);
     onChange(e.target.value);
   };
 
   const handleProductClick = (product: Product) => {
     onChange(product.name);
     setIsOpen(false);
+    setUserInteracted(false);
     onProductSelect?.(product);
+  };
+
+  const handleFocus = () => {
+    setUserInteracted(true);
+    if (value && filteredProducts.length > 0) {
+      setIsOpen(true);
+    }
+  };
+
+  const handleBlur = () => {
+    // Сбрасываем флаг взаимодействия при потере фокуса
+    // Небольшая задержка, чтобы клик по элементу dropdown успел сработать
+    setTimeout(() => {
+      setUserInteracted(false);
+    }, 200);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -145,7 +165,8 @@ export default function ProductAutocomplete({
         value={value}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
-        onFocus={() => value && filteredProducts.length > 0 && setIsOpen(true)}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         placeholder={placeholder}
         required={required}

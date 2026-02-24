@@ -5,6 +5,7 @@ import { getShoppingListSyncService } from '@/lib/googleSheets/shoppingListSync'
 import { getInventorySyncService } from '@/lib/googleSheets/inventorySync';
 import { getProductsSyncService } from '@/lib/googleSheets/productsSync';
 import { storageService } from '@/lib/storageService';
+import { convertToBaseUnit } from '@/lib/unitConverter';
 import type { 
   ShoppingListItem, 
   ShoppingListItemWithDetails, 
@@ -75,6 +76,9 @@ export function useShoppingList(): UseShoppingListResult {
         productsSync.getAllProducts(spreadsheetId),
       ]);
       
+      // Сохраняем в localStorage
+      storageService.setShoppingList(shoppingItems);
+      
       const productMap = new Map(products.map(p => [p.product_id, p]));
       
       const itemsWithDetails: ShoppingListItemWithDetails[] = shoppingItems.map(item => ({
@@ -91,8 +95,30 @@ export function useShoppingList(): UseShoppingListResult {
       
       setItems(itemsWithDetails);
     } catch (err) {
-      console.error('Failed to load shopping list:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load shopping list');
+      console.error('Failed to load shopping list from Google Sheets:', err);
+      console.log('Loading from localStorage (offline mode)...');
+      
+      // В случае ошибки загружаем из localStorage (офлайн режим)
+      const cachedItems = storageService.getShoppingList();
+      if (cachedItems.length > 0) {
+        // Пытаемся загрузить продукты для отображения деталей
+        const productMap = new Map<string, Product>();
+        const itemsWithDetails: ShoppingListItemWithDetails[] = cachedItems.map(item => ({
+          ...item,
+          product: productMap.get(item.product_id) || {
+            product_id: item.product_id,
+            name: 'Unknown Product',
+            category: 'Другое',
+            default_unit: item.unit,
+            created_date: new Date().toISOString(),
+            usage_count: 0,
+          },
+        }));
+        setItems(itemsWithDetails);
+        setError('Работа в офлайн режиме');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load shopping list');
+      }
     } finally {
       setLoading(false);
     }
@@ -106,17 +132,50 @@ export function useShoppingList(): UseShoppingListResult {
       setError('Spreadsheet ID not found');
       return;
     }
-
+    
     setLoading(true);
     setError(null);
 
+    // Конвертируем единицы измерения в базовые
+    const converted = convertToBaseUnit(input.quantity_to_buy, input.unit);
+    const normalizedInput: CreateShoppingItemInput = {
+      ...input,
+      quantity_needed: convertToBaseUnit(input.quantity_needed, input.unit).quantity,
+      quantity_available: input.quantity_available 
+        ? convertToBaseUnit(input.quantity_available, input.unit).quantity 
+        : 0,
+      quantity_to_buy: converted.quantity,
+      unit: converted.unit,
+    };
+
+    console.log('🔄 Unit conversion in shopping list:', {
+      original: `${input.quantity_to_buy} ${input.unit}`,
+      converted: `${converted.quantity} ${converted.unit}`
+    });
+
+    // Создаем новый элемент и сохраняем локально сразу
+    const newItem: ShoppingListItem = {
+      shopping_item_id: crypto.randomUUID(),
+      product_id: normalizedInput.product_id,
+      recipe_id: normalizedInput.recipe_id,
+      quantity_needed: normalizedInput.quantity_needed,
+      quantity_available: normalizedInput.quantity_available,
+      quantity_to_buy: normalizedInput.quantity_to_buy,
+      unit: normalizedInput.unit,
+      checked: false,
+      added_date: new Date().toISOString(),
+    };
+    storageService.addShoppingItem(newItem);
+
     try {
       const shoppingListSync = getShoppingListSyncService();
-      await shoppingListSync.addItem(spreadsheetId, input);
+      await shoppingListSync.addItem(spreadsheetId, normalizedInput);
       await loadShoppingList();
     } catch (err) {
-      console.error('Failed to add item:', err);
-      setError(err instanceof Error ? err.message : 'Failed to add item');
+      console.error('Failed to add item to Google Sheets:', err);
+      console.log('Item added locally (offline mode)');
+      // Оставляем локальное изменение, просто обновляем отображение
+      await loadShoppingList();
     } finally {
       setLoading(false);
     }
@@ -167,6 +226,7 @@ export function useShoppingList(): UseShoppingListResult {
       
       console.log('Creating new shopping items from missing quantities...');
       // Создать список покупок из недостающих продуктов
+      // Примечание: missing_quantities уже содержат количество в базовых единицах (из recipeMatcher)
       const newItems: CreateShoppingItemInput[] = recipeMatch.missing_quantities.map(missing => {
         const quantityAvailable = inventoryMap.get(missing.product_id) || 0;
         
@@ -176,7 +236,7 @@ export function useShoppingList(): UseShoppingListResult {
           quantity_needed: missing.missing + quantityAvailable,
           quantity_available: quantityAvailable,
           quantity_to_buy: missing.missing,
-          unit: missing.unit,
+          unit: missing.unit, // Уже в базовой единице
           checked: false,
         };
         
@@ -222,17 +282,28 @@ export function useShoppingList(): UseShoppingListResult {
    */
   const markAsChecked = useCallback(async (shoppingItemId: string) => {
     if (!spreadsheetId) return;
-
+    
     setLoading(true);
     setError(null);
+
+    // Обновляем локально сразу для быстрого отклика
+    const cachedItems = storageService.getShoppingList();
+    const itemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
+    if (itemIndex !== -1) {
+      cachedItems[itemIndex].checked = true;
+      cachedItems[itemIndex].purchased_date = new Date().toISOString();
+      storageService.setShoppingList(cachedItems);
+    }
 
     try {
       const shoppingListSync = getShoppingListSyncService();
       await shoppingListSync.markAsChecked(spreadsheetId, shoppingItemId);
       await loadShoppingList();
     } catch (err) {
-      console.error('Failed to mark as checked:', err);
-      setError(err instanceof Error ? err.message : 'Failed to mark as checked');
+      console.error('Failed to mark as checked in Google Sheets:', err);
+      console.log('Item marked locally (offline mode)');
+      // Оставляем локальное изменение, просто обновляем отображение
+      await loadShoppingList();
     } finally {
       setLoading(false);
     }
@@ -243,17 +314,28 @@ export function useShoppingList(): UseShoppingListResult {
    */
   const unmarkChecked = useCallback(async (shoppingItemId: string) => {
     if (!spreadsheetId) return;
-
+    
     setLoading(true);
     setError(null);
+
+    // Обновляем локально сразу для быстрого отклика
+    const cachedItems = storageService.getShoppingList();
+    const itemIndex = cachedItems.findIndex(item => item.shopping_item_id === shoppingItemId);
+    if (itemIndex !== -1) {
+      cachedItems[itemIndex].checked = false;
+      cachedItems[itemIndex].purchased_date = undefined;
+      storageService.setShoppingList(cachedItems);
+    }
 
     try {
       const shoppingListSync = getShoppingListSyncService();
       await shoppingListSync.unmarkChecked(spreadsheetId, shoppingItemId);
       await loadShoppingList();
     } catch (err) {
-      console.error('Failed to unmark checked:', err);
-      setError(err instanceof Error ? err.message : 'Failed to unmark checked');
+      console.error('Failed to unmark checked in Google Sheets:', err);
+      console.log('Item unmarked locally (offline mode)');
+      // Оставляем локальное изменение, просто обновляем отображение
+      await loadShoppingList();
     } finally {
       setLoading(false);
     }
@@ -264,17 +346,22 @@ export function useShoppingList(): UseShoppingListResult {
    */
   const deleteItem = useCallback(async (shoppingItemId: string) => {
     if (!spreadsheetId) return;
-
+    
     setLoading(true);
     setError(null);
+
+    // Удаляем локально сразу для быстрого отклика
+    storageService.deleteShoppingItem(shoppingItemId);
 
     try {
       const shoppingListSync = getShoppingListSyncService();
       await shoppingListSync.deleteItem(spreadsheetId, shoppingItemId);
       await loadShoppingList();
     } catch (err) {
-      console.error('Failed to delete item:', err);
-      setError(err instanceof Error ? err.message : 'Failed to delete item');
+      console.error('Failed to delete item in Google Sheets:', err);
+      console.log('Item deleted locally (offline mode)');
+      // Оставляем локальное изменение, просто обновляем отображение
+      await loadShoppingList();
     } finally {
       setLoading(false);
     }
@@ -285,9 +372,14 @@ export function useShoppingList(): UseShoppingListResult {
    */
   const clearChecked = useCallback(async () => {
     if (!spreadsheetId) return;
-
+    
     setLoading(true);
     setError(null);
+
+    // Очищаем локально сразу для быстрого отклика
+    const cachedItems = storageService.getShoppingList();
+    const uncheckedItems = cachedItems.filter(item => !item.checked);
+    storageService.setShoppingList(uncheckedItems);
 
     try {
       const shoppingListSync = getShoppingListSyncService();
@@ -295,8 +387,10 @@ export function useShoppingList(): UseShoppingListResult {
       console.log(`Cleared ${count} checked items`);
       await loadShoppingList();
     } catch (err) {
-      console.error('Failed to clear checked items:', err);
-      setError(err instanceof Error ? err.message : 'Failed to clear checked items');
+      console.error('Failed to clear checked items in Google Sheets:', err);
+      console.log('Items cleared locally (offline mode)');
+      // Оставляем локальное изменение, просто обновляем отображение
+      await loadShoppingList();
     } finally {
       setLoading(false);
     }
@@ -315,13 +409,14 @@ export function useShoppingList(): UseShoppingListResult {
       const inventorySync = getInventorySyncService();
       const checkedItems = items.filter(item => item.checked);
       
+      // Элементы уже в базовых единицах, можно добавлять напрямую
       for (const item of checkedItems) {
         await inventorySync.addInventoryItem(
           spreadsheetId,
           {
             product_id: item.product_id,
-            quantity: item.quantity_to_buy,
-            unit: item.unit,
+            quantity: item.quantity_to_buy, // Уже в базовой единице
+            unit: item.unit, // Уже базовая единица
             expiry_date: undefined,
             notes: `Добавлено из списка покупок`,
           }

@@ -5,12 +5,13 @@ import type { InventoryItem, InventoryItemWithProduct, CreateInventoryInput } fr
 import { getInventorySyncService } from '@/lib/googleSheets/inventorySync';
 import { storageService } from '@/lib/storageService';
 import { useGoogleApi } from '@/components/GoogleApiProvider';
+import { convertToBaseUnit } from '@/lib/unitConverter';
 
 /**
  * Хук для работы с инвентарем холодильника
  */
 export function useInventory() {
-  const { isAuthenticated } = useGoogleApi();
+  const { isAuthenticated, isInitialized } = useGoogleApi();
   const [inventory, setInventory] = useState<InventoryItemWithProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,23 +34,49 @@ export function useInventory() {
     try {
       const data = await inventoryService.getInventoryWithProducts(spreadsheetId);
       setInventory(data);
+      
+      // Сохраняем в localStorage (без product, только InventoryItem)
+      const inventoryItems = data.map(({ product, ...item }) => item);
+      storageService.setInventory(inventoryItems);
+      console.log(`✅ Synced ${inventoryItems.length} inventory items to localStorage`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load inventory';
+      console.error('❌ Failed to load inventory from Google Sheets:', err);
+      console.log('📦 Loading from localStorage (offline mode)...');
+      
+      // В случае ошибки загружаем из localStorage (офлайн режим)
+      const cachedItems = storageService.getInventory();
+      if (cachedItems.length > 0) {
+        // Загружаем без product details - они будут "Unknown Product"
+        // Для полноценной работы нужны данные из Google Sheets
+        const itemsWithPlaceholders: InventoryItemWithProduct[] = cachedItems.map(item => ({
+          ...item,
+          product: {
+            product_id: item.product_id,
+            name: 'Unknown Product (offline)',
+            default_unit: item.unit,
+            created_date: new Date().toISOString(),
+            usage_count: 0,
+          },
+        }));
+        setInventory(itemsWithPlaceholders);
+        console.log(`📦 Loaded ${cachedItems.length} items from localStorage`);
+      }
       setError(message);
-      console.error('Failed to load inventory:', err);
     } finally {
       setLoading(false);
     }
   }, [spreadsheetId, inventoryService]);
 
   /**
-   * Автозагрузка при монтировании
+   * Автозагрузка при монтировании и авторизации
    */
   useEffect(() => {
-    if (spreadsheetId && isAuthenticated) {
+    if (spreadsheetId && isAuthenticated && isInitialized) {
+      console.log('🔄 Syncing inventory from Google Sheets...');
       loadInventory();
     }
-  }, [spreadsheetId, loadInventory, isAuthenticated]);
+  }, [spreadsheetId, loadInventory, isAuthenticated, isInitialized]);
 
   /**
    * Добавить новый продукт в инвентарь
@@ -64,7 +91,25 @@ export function useInventory() {
     setError(null);
 
     try {
-      const newItem = await inventoryService.addInventoryItem(spreadsheetId, input);
+      // Конвертируем единицы измерения в базовые перед сохранением
+      const converted = convertToBaseUnit(input.quantity, input.unit);
+      const normalizedInput: CreateInventoryInput = {
+        ...input,
+        quantity: converted.quantity,
+        unit: converted.unit,
+      };
+
+      console.log('🔄 Unit conversion:', {
+        original: `${input.quantity} ${input.unit}`,
+        converted: `${converted.quantity} ${converted.unit}`
+      });
+
+      const newItem = await inventoryService.addInventoryItem(spreadsheetId, normalizedInput);
+      
+      // Сохраняем в localStorage
+      storageService.addItem(newItem);
+      console.log('✅ Item saved to localStorage');
+      
       await loadInventory(); // Reload to get with product details
       return newItem;
     } catch (err) {
@@ -90,8 +135,25 @@ export function useInventory() {
     setError(null);
 
     try {
-      const success = await inventoryService.updateInventoryItem(spreadsheetId, item);
+      // Конвертируем единицы измерения в базовые перед сохранением
+      const converted = convertToBaseUnit(item.quantity, item.unit);
+      const normalizedItem: InventoryItem = {
+        ...item,
+        quantity: converted.quantity,
+        unit: converted.unit,
+      };
+
+      console.log('🔄 Unit conversion on update:', {
+        original: `${item.quantity} ${item.unit}`,
+        converted: `${converted.quantity} ${converted.unit}`
+      });
+
+      const success = await inventoryService.updateInventoryItem(spreadsheetId, normalizedItem);
       if (success) {
+        // Сохраняем в localStorage
+        storageService.updateItem(normalizedItem);
+        console.log('✅ Item updated in localStorage');
+        
         await loadInventory(); // Reload to get updated data
       }
       return success;
@@ -120,6 +182,10 @@ export function useInventory() {
     try {
       const success = await inventoryService.deleteInventoryItem(spreadsheetId, inventoryId);
       if (success) {
+        // Удаляем из localStorage
+        storageService.deleteItem(inventoryId);
+        console.log('✅ Item deleted from localStorage');
+        
         setInventory(prev => prev.filter(item => item.inventory_id !== inventoryId));
       }
       return success;
