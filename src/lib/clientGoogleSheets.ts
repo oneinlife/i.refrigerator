@@ -334,7 +334,7 @@ export class ClientGoogleSheetsService {
     (window as any).gapi.client.setToken({ access_token: storageService.getGoogleToken() });
   }
 
-  private async refreshTokenSilently(): Promise<void> {
+  async refreshTokenSilently(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.tokenClient) {
         reject(new Error('Token client not initialized'));

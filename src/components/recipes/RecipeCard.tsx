@@ -26,7 +26,7 @@ export default function RecipeCard({ recipe, matchPercentage, onDelete }: Recipe
       transition={{ duration: 0.2 }}
       className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-shadow"
     >
-      <Link href={`/recipes/${recipe.recipe_id}`}>
+      <Link href={`/recipes/view?id=${recipe.recipe_id}`}>
         <div className="relative">
           {recipe.image_url ? (
             <div className="relative w-full h-48">

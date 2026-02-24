@@ -219,7 +219,7 @@ export default function RecipeSearchPage() {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <Link
-                        href={`/recipes/${match.recipe.recipe_id}`}
+                        href={`/recipes/view?id=${match.recipe.recipe_id}`}
                         className="text-xl font-bold text-gray-800 hover:text-blue-600"
                       >
                         {match.recipe.name}
@@ -313,7 +313,7 @@ export default function RecipeSearchPage() {
                   {/* Кнопки действий */}
                   <div className="mt-4 flex gap-2">
                     <Link
-                      href={`/recipes/${match.recipe.recipe_id}`}
+                      href={`/recipes/view?id=${match.recipe.recipe_id}`}
                       className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-center text-sm"
                     >
                       Открыть рецепт

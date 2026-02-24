@@ -78,9 +78,19 @@ export default function GoogleApiProvider({ children }: { children: React.ReactN
         
         // Проверяем, не истек ли токен
         if (authenticated && storageService.isGoogleTokenExpired()) {
-          console.warn('⚠️ Token expired, user needs to re-authenticate');
-          setIsAuthenticated(false);
-          setError('Сессия истекла. Пожалуйста, войдите снова.');
+          console.log('⚠️ Token expired, attempting silent refresh...');
+          try {
+            // Пытаемся автоматически обновить токен
+            await service.refreshTokenSilently();
+            console.log('✅ Token successfully refreshed');
+            setIsAuthenticated(true);
+            setError(null);
+          } catch (refreshError) {
+            console.warn('⚠️ Failed to refresh token automatically:', refreshError);
+            // Только если не удалось обновить - показываем сообщение
+            setIsAuthenticated(false);
+            setError('Сессия истекла. Пожалуйста, войдите снова.');
+          }
           return;
         }
         
