@@ -22,7 +22,7 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
   // Для отображения в UI храним выбранный продукт
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   
-  const [formData, setFormData] = useState<CreateInventoryInput>({
+  const [formData, setFormData] = useState<Omit<CreateInventoryInput, 'quantity'> & { quantity: number | '' }>({
     product_id: editItem?.product_id || '',
     quantity: editItem?.quantity || 1,
     unit: editItem?.unit || Unit.PCS,
@@ -59,6 +59,12 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Проверяем, что количество указано и больше 0
+    if (formData.quantity === '' || formData.quantity <= 0) {
+      alert('Укажите корректное количество продукта');
+      return;
+    }
+
     let productId = formData.product_id;
     let product = products.find(p => p.product_id === productId);
 
@@ -84,7 +90,11 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
       return;
     }
 
-    onSubmit({ ...formData, product_id: productId });
+    onSubmit({ 
+      ...formData, 
+      product_id: productId,
+      quantity: typeof formData.quantity === 'number' ? formData.quantity : parseFloat(formData.quantity)
+    });
 
     // Сбросить форму
     if (!editItem) {
@@ -152,7 +162,13 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
             min="0"
             step="0.01"
             value={formData.quantity}
-            onChange={(e) => setFormData({ ...formData, quantity: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => {
+              const value = e.target.value;
+              setFormData({ 
+                ...formData, 
+                quantity: value === '' ? '' : parseFloat(value) || 0 
+              });
+            }}
             className="w-full px-3 py-2 border rounded-md"
           />
         </div>

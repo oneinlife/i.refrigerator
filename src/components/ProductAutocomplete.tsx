@@ -129,7 +129,7 @@ export default function ProductAutocomplete({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!isOpen || filteredProducts.length === 0) {
       // Если выпадающий список закрыт или пуст, обрабатываем Enter отдельно
-      if (e.key === 'Enter' && value.trim()) {
+      if (e.key === 'Enter') {
         e.preventDefault();
         onEnter?.();
       }

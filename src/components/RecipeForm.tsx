@@ -42,7 +42,7 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
     Array<{
       productId: string;
       productName: string;
-      quantity: number;
+      quantity: number | '';
       unit: string;
       optional: boolean;
       notes: string;
@@ -191,6 +191,13 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
       return;
     }
 
+    // Проверяем, что у всех ингредиентов указано количество
+    const invalidIngredients = ingredients.filter(ing => ing.quantity === '' || ing.quantity <= 0);
+    if (invalidIngredients.length > 0) {
+      alert('Укажите корректное количество для всех ингредиентов');
+      return;
+    }
+
     if (!instructions.trim()) {
       alert('Введите инструкции приготовления');
       return;
@@ -260,7 +267,7 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
 
       const ingredientsData = processedIngredients.map(ing => ({
         product_id: ing.productId,
-        quantity: ing.quantity,
+        quantity: typeof ing.quantity === 'number' ? ing.quantity : parseFloat(ing.quantity as string),
         unit: ing.unit,
         optional: ing.optional,
         notes: ing.notes.trim() || undefined,
@@ -500,9 +507,14 @@ export default function RecipeFormPage({ recipeId }: RecipeFormProps) {
                           <input
                             type="number"
                             value={ing.quantity}
-                            onChange={(e) =>
-                              handleUpdateIngredient(index, 'quantity', parseFloat(e.target.value) || 0)
-                            }
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              handleUpdateIngredient(
+                                index,
+                                'quantity',
+                                value === '' ? '' : parseFloat(value) || 0
+                              );
+                            }}
                             step="0.1"
                             min="0"
                             className="w-full px-2 py-1 text-sm border rounded"
