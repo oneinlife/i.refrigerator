@@ -132,11 +132,10 @@ export default function InventoryForm({ onSubmit, editItem, onProductCreated, hi
                 setSelectedProduct(null);
                 setFormData({ ...formData, product_id: '' });
               } else {
-                // Капитализируем имя при ручном вводе
-                const normalizedValue = normalizeProductName(value);
+                // Сохраняем значение как есть, нормализуем только при сохранении
                 setSelectedProduct({
                   product_id: '',
-                  name: normalizedValue,
+                  name: value,
                   default_unit: formData.unit,
                   usage_count: 0,
                   created_date: new Date().toISOString(),
